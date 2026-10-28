@@ -1,0 +1,12 @@
+dist/
+node_modules/
+.DS_Store
+.openai/
+outputs/
+
+.env*
+!.env.example
+*.log
+backups/
+wezanc-backup-*.json
+backup_wezanc_os_*.json
