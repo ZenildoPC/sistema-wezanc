@@ -275,12 +275,13 @@ async function enableSaleNotifications() {
   } catch { toast('Não foi possível ativar as notificações neste navegador.'); }
 }
 async function saleNotification(title, body) {
-  if (demo || localStorage.getItem('wezanc_sale_notifications') !== 'on' || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (demo || localStorage.getItem('wezanc_sale_notifications') !== 'on' || !('Notification' in window) || Notification.permission !== 'granted') return false;
   try {
     const registration = await navigator.serviceWorker?.ready;
     if (registration?.showNotification) await registration.showNotification(title, {body, icon:'/icon-192.png', badge:'/icon-192.png', tag:`wezanc-sale-${Date.now()}`});
     else new Notification(title, {body, icon:'/icon-192.png'});
-  } catch {}
+    return true;
+  } catch { return false; }
 }
 const lost = c => c.statusInbound === '07_nao_fechou' || c.statusOutbound === '06_nao_fechou';
 const flow = c => c.origem === IN ? 'inbound' : 'outbound',
@@ -467,12 +468,13 @@ const titles = {
   clients: 'Clientes',
   finance: 'Financeiro',
   nfc: 'Plaquinhas NFC',
+  notifications: 'Notificações',
   ai: 'Agentes de IA',
   settings: 'Configurações'
 };
-const moduleDescriptions = {home:'Resumo e acessos rápidos',nfc:'Estoque, custos e vendas',leads:'Prospecção e contatos',inbound:'Clientes que chegam até você',outbound:'Vendas e oportunidades',lost:'Retomar negociações',tasks:'Checklists e entregas',clients:'Contatos e histórico',maintenance:'Planos e recorrência',finance:'Recebimentos e despesas',ai:'Especialistas e ferramentas',settings:'Backups e preferências'};
+const moduleDescriptions = {home:'Resumo e acessos rápidos',nfc:'Estoque, custos e vendas',notifications:'Lance avisos personalizados',leads:'Prospecção e contatos',inbound:'Clientes que chegam até você',outbound:'Vendas e oportunidades',lost:'Retomar negociações',tasks:'Checklists e entregas',clients:'Contatos e histórico',maintenance:'Planos e recorrência',finance:'Recebimentos e despesas',ai:'Especialistas e ferramentas',settings:'Backups e preferências'};
 function nav() {
-  const groups = [['INÍCIO', ['home']], ['PRODUTOS', ['nfc']], ['COMERCIAL', ['leads', 'inbound', 'outbound', 'lost']], ['GESTÃO', ['tasks', 'clients', 'maintenance', 'finance']], ['FERRAMENTAS', ['ai', 'settings']]];
+  const groups = [['INÍCIO', ['home']], ['PRODUTOS', ['nfc']], ['COMERCIAL', ['leads', 'inbound', 'outbound', 'lost']], ['GESTÃO', ['tasks', 'clients', 'maintenance', 'finance']], ['FERRAMENTAS', ['notifications', 'ai', 'settings']]];
   $('#sidebar').innerHTML = `<button class="brand" data-page="home" aria-label="Wezanc — início"><img src="icon.svg" alt=""><div><strong>WEZANC</strong><small>GESTÃO EMPRESARIAL</small></div></button><nav class="sidebar-navigation" aria-label="Módulos do sistema">${groups.map(([name,pages])=>`<div class="nav-label">${name}</div>${pages.map(p=>`<button class="nav-item ${page===p?'active':''}" data-page="${p}" ${page===p?'aria-current="page"':''}>${icon(p)}<span>${({home:'Painel inicial',inbound:'Inbound',outbound:'Outbound',maintenance:'Manutenção',settings:'Backup e ajustes'})[p]||titles[p]}</span>${p==='nfc'?`<span class="nav-count">${nfcStock()}</span>`:p==='leads'?`<span class="nav-count">${db.prospects.length}</span>`:''}</button>`).join('')}`).join('')}</nav><div class="sidebar-local">${icon('shield')} Salvo neste navegador</div>`;
   $('#mobile-nav').innerHTML = [['home','Início'],['leads','Leads'],['nfc','NFC'],['finance','Finanças'],['more','Módulos']].map(([p,t])=>`<button ${p==='more'?'data-action="menu"':`data-page="${p}"`} class="${page===p||(p==='more'&&!['home','leads','nfc','finance'].includes(page))?'active':''}" ${page===p?'aria-current="page"':''}>${icon(p)}${t}</button>`).join('');
   $('#breadcrumb').textContent = titles[page];
@@ -505,6 +507,7 @@ function render() {
     maintenance: maintenance,
     finance: finance,
     nfc: nfcPage,
+    notifications: notificationsPage,
     ai: agents,
     settings: settings
   }[page]();
@@ -596,6 +599,14 @@ function finance() {
 const agentData = [['Social media e conteúdo', 'Estratégias para Instagram, Reels e conteúdo orgânico.', 'ZUJBFnOavEot', 'Conteúdo'], ['Análise visual e Raio-X', 'Avaliação de marcas e oportunidades de posicionamento.', 'cXSqXLDC9Uxa', 'Design'], ['Comercial e vendas', 'Abordagens, propostas e apoio à negociação.', 'uzrvFrp6sN8j', 'Comercial'], ['Negócios e gestão', 'Organização de contratos, planos e decisões da empresa.', '9JbQ5lzgLBDL', 'Gestão'], ['Marketing e tráfego', 'Planejamento de campanhas e captação de clientes.', 'wkoXVFp3qTvu', 'Marketing']];
 function agents() {
   return head('Central de agentes', 'Seus agentes de IA, organizados por especialidade.') + `<div class="notice">${icon('ai')}<span>Os agentes abrem no Gemini, em uma nova aba, e podem solicitar login. Nenhum dado do cliente é enviado automaticamente.</span></div><div class="cards">${agentData.map(([name, desc, url, tag]) => `<article class="card"><div class="card-head"><span class="avatar">${icon('spark')}</span><span class="tag">${tag}</span></div><h3>${name}</h3><p class="card-text">${desc}</p><a class="btn secondary" href="https://share.gemini.google/${url}" target="_blank" rel="noopener noreferrer">Abrir agente ${icon('outbound')}</a></article>`).join('')}</div>`;
+}
+function notificationsPage() {
+  const enabled = 'Notification' in window && Notification.permission === 'granted' && localStorage.getItem('wezanc_sale_notifications') === 'on';
+  const services = ['Landing Page Express', 'Site Institucional', 'E-commerce', 'Sistema de Agendamento', 'Sistema de Gestão', 'Aplicativo Web', 'Automação Comercial', 'Venda de plaquinhas NFC', 'Outro'];
+  return head('Central de notificações', 'Monte e lance um aviso personalizado para este aparelho.') +
+    `<section class="panel notification-composer"><div class="panel-head"><div><h2>${enabled ? 'Notificações ativadas' : 'Ative as notificações neste aparelho'}</h2><p>${enabled ? 'Você já pode lançar avisos manualmente. As vendas registradas também podem gerar avisos automáticos.' : 'O navegador pedirá autorização. No iPhone e iPad, abra o app pela Tela de Início.'}</p></div>${enabled ? '<span class="tag">Pronto para enviar</span>' : btn('Ativar notificações', 'enable-sale-notifications', 'spark', 'secondary')}</div>
+    <form id="notification-form"><div class="form-grid">${select('Serviço ou sistema', 'servico', services, 'Site Institucional')}${field('Nome que aparecerá no aviso', 'titulo', '', 'text', 'maxlength="80" placeholder="Ex.: Sistema da Clínica Aurora"')}${field('Cliente ou empresa', 'cliente', '', 'text', 'maxlength="120" placeholder="Ex.: Clínica Aurora"')}${field('Valor da venda (R$)', 'valor', '', 'number', 'min="0" step="0.01" inputmode="decimal" placeholder="Opcional"')}${select('Forma de pagamento', 'pagamento', ['Pix à vista', 'Pix parcelado', 'Cartão de crédito', 'Boleto', 'Transferência', 'Dinheiro', 'Não informar'], 'Pix à vista')}<label class="field full">Mensagem adicional<textarea name="mensagem" maxlength="240" placeholder="Ex.: Projeto aprovado e já entrou em produção!"></textarea></label></div><div class="actions notification-actions"><button class="btn" type="submit">${icon('spark')}Lançar notificação</button></div></form></section>
+    <div class="notice">${icon('shield')}<span>Os avisos manuais aparecem apenas neste aparelho. As notificações automáticas de novas vendas e mensalidades continuam funcionando.</span></div>`;
 }
 function settings() {
   const notificationsOn = localStorage.getItem('wezanc_sale_notifications') === 'on' && ('Notification' in window) && Notification.permission === 'granted';
@@ -987,6 +998,22 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('submit', e => {
   const f = e.target;
+  if (f.id === 'notification-form') {
+    e.preventDefault();
+    if (!('Notification' in window) || Notification.permission !== 'granted' || localStorage.getItem('wezanc_sale_notifications') !== 'on') {
+      toast('Ative as notificações nesta página antes de lançar um aviso.');
+      return;
+    }
+    const data = Object.fromEntries(new FormData(f));
+    const title = data.titulo.trim() || `✨ ${data.servico}`;
+    const amount = data.valor ? ` · ${money(data.valor)}` : '';
+    const payment = data.pagamento && data.pagamento !== 'Não informar' ? ` via ${data.pagamento}` : '';
+    const client = data.cliente.trim() ? `${data.cliente} — ` : '';
+    const extra = data.mensagem.trim() ? ` ${data.mensagem.trim()}` : '';
+    void saleNotification(title, `${client}${data.servico}${amount}${payment}.${extra}`).then(sent => toast(sent ? 'Notificação lançada neste aparelho.' : 'Não foi possível exibir a notificação.'));
+    f.reset();
+    return;
+  }
   if (['nfc-sale-form', 'nfc-stock-form', 'nfc-customer-form'].includes(f.id)) {
     e.preventDefault();
     handleNfcSubmit(f);
