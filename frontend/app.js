@@ -447,7 +447,7 @@ function handleNfcSubmit(form) {
         if (data.clienteId === 'new') db.nfc.clientes.push(customer);
         db.nfc.movimentos.push({id: uid(), tipo: 'venda', quantidade: quantity, valorCentavos: value, custoCentavos: cost, clienteId: customer.id, clienteNome: customer.nome, clienteEmpresa: customer.empresa, data: data.data, motivo: data.motivo || '', criadoEm: new Date().toISOString()});
         log(`Venda NFC: ${quantity} plaquinhas para ${customer.empresa}`, 'nfc');
-        window.pendingSaleNotification = {title: `Venda NFC registrada - ${customer.empresa}`.slice(0, 80), body: `Cliente: ${customer.empresa} · Quantidade: ${quantity} · Valor: ${money(value / 100)} · Pagamento: ${data.formaPagamento || 'Não informado'}. Venda registrada com sucesso.`};
+        window.pendingSaleNotification = {title: 'Venda registrada', body: `Cliente: ${customer.empresa}\nProduto: Plaquinhas NFC\nQuantidade: ${quantity}\nValor recebido: ${money(value / 100)}\nForma de pagamento: ${data.formaPagamento || 'Não informado'}\nVenda registrada com sucesso.`};
       }
     }
     const saved = save(form.id === 'nfc-sale-form' ? 'Venda registrada. Estoque atualizado automaticamente.' : 'Dados NFC salvos neste navegador.');
@@ -614,7 +614,7 @@ const notificationMessages = {
 function notificationDraft(service, name = '') {
   const lead = String(name || '').trim();
   return {
-    title: (lead ? `Venda registrada - ${lead}` : 'Venda registrada').slice(0, 80),
+    title: 'Venda registrada',
     message: notificationMessages[service] || notificationMessages.Outro
   };
 }
@@ -634,8 +634,8 @@ function updateNotificationPreview() {
   const amount = money(data.valor || 0);
   const payment = data.pagamento || 'Não informado';
   const service = data.servico || 'Não informado';
-  const title = String(data.titulo || '').trim() || notificationDraft(service, who).title;
-  const body = `Cliente: ${who} · Serviço: ${service} · Valor: ${amount} · Pagamento: ${payment}. ${String(data.mensagem || '').trim()}`;
+  const title = 'Venda registrada';
+  const body = `Cliente: ${who}\nServiço: ${service}\nValor recebido: ${amount}\nForma de pagamento: ${payment}\n${String(data.mensagem || '').trim()}`;
   const age = notificationAge(data);
   const titleNode = $('[data-notification-preview-title]');
   const bodyNode = $('[data-notification-preview-body]');
@@ -651,7 +651,6 @@ function applyNotificationDraft() {
   const name = selected?.dataset.name || form.elements.cliente.value.trim();
   if (selected?.dataset.name) form.elements.cliente.value = selected.dataset.name;
   const draft = notificationDraft(form.elements.servico.value, name);
-  form.elements.titulo.value = draft.title;
   form.elements.mensagem.value = draft.message;
   updateNotificationPreview();
 }
@@ -664,8 +663,8 @@ function notificationsPage() {
   return head('Central de notificações', 'Prepare um aviso profissional com os dados da venda e confira a prévia antes de enviar.') +
     `<section class="notification-status ${enabled ? 'is-ready' : ''}"><div class="notification-status-icon">${icon('spark')}</div><div><span class="eyebrow">CENTRAL DE AVISOS</span><h2>${enabled ? 'Notificações prontas' : 'Ative as notificações neste aparelho'}</h2><p>${enabled ? 'Alertas manuais e avisos de novas vendas podem aparecer aqui.' : 'Autorize os avisos uma vez para começar a usar.'}</p></div>${enabled ? '<span class="notification-status-pill">Ativado</span>' : btn('Ativar notificações', 'enable-sale-notifications', 'spark')}</section>
     <div class="notification-layout"><section class="panel notification-composer"><div class="notification-section-head"><div><span class="eyebrow">NOVA NOTIFICAÇÃO</span><h2>Dados da venda</h2><p>Selecione o contato para inserir o nome automaticamente.</p></div></div>
-    <form id="notification-form"><div class="form-grid"><label class="field">Serviço ou sistema<select name="servico" id="notification-service">${services.map(s => `<option ${s === 'Site Institucional' ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label><label class="field">Lead ou cliente<select name="leadId" id="notification-lead"><option value="">Escolher contato (opcional)</option>${leads ? `<optgroup label="Leads">${leads}</optgroup>` : ''}${clients ? `<optgroup label="Clientes">${clients}</optgroup>` : ''}</select></label>${field('Título da notificação', 'titulo', initial.title, 'text', 'maxlength="80" placeholder="Venda registrada"')}${field('Nome do lead / cliente', 'cliente', '', 'text', 'maxlength="120" placeholder="Selecione ou digite o nome"')}${field('Valor recebido (R$) *', 'valor', '', 'number', 'required min="0.01" step="0.01" inputmode="decimal" placeholder="Informe o valor"')}<label class="field">Forma de pagamento<select name="pagamento" required><option>Pix à vista</option><option>Pix parcelado</option><option>Cartão de crédito</option><option>Boleto</option><option>Transferência</option><option>Dinheiro</option></select></label><label class="field">Exibir horário como ocorrido há<input name="tempoQuantidade" type="number" min="0" max="100000" step="1" value="1" required></label><label class="field">Unidade de tempo<select name="tempoUnidade"><option value="minutes">Minutos</option><option value="hours" selected>Horas</option><option value="days">Dias</option><option value="weeks">Semanas</option></select></label><label class="field full">Mensagem pronta — editável<textarea name="mensagem" id="notification-message" maxlength="240">${esc(initial.message)}</textarea></label></div><div class="notification-form-footer"><span>O título acompanha o contato selecionado. O valor e o pagamento entram no aviso.</span><button class="btn" type="submit">${icon('spark')}Lançar notificação</button></div></form></section>
-    <aside class="notification-preview-panel"><div class="notification-preview-label"><span>PRÉVIA NO APARELHO</span><span class="preview-live"><i></i> AO VIVO</span></div><div class="notification-device"><div class="notification-preview-top"><span>Notificação</span><span data-notification-preview-time>há 1 hora</span></div><div class="notification-preview-content"><img class="notification-app-icon" src="icon-192.png" alt="Logo Wezanc"><div class="notification-copy"><strong data-notification-preview-title>${esc(initial.title)}</strong><p data-notification-preview-body>Cliente: Não informado · Serviço: Site Institucional · Valor: R$ 0,00 · Pagamento: Pix à vista. ${esc(initial.message)}</p></div></div></div><p class="notification-preview-hint">A prévia acompanha o serviço, o contato, o valor, o pagamento e a mensagem.</p><div class="notification-preview-note">${icon('shield')}<span>A logo Wezanc aparecerá junto ao aviso neste aparelho.</span></div></aside></div>
+    <form id="notification-form"><div class="form-grid"><label class="field">Serviço ou sistema<select name="servico" id="notification-service">${services.map(s => `<option ${s === 'Site Institucional' ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label><label class="field">Lead ou cliente<select name="leadId" id="notification-lead"><option value="">Escolher contato (opcional)</option>${leads ? `<optgroup label="Leads">${leads}</optgroup>` : ''}${clients ? `<optgroup label="Clientes">${clients}</optgroup>` : ''}</select></label>${field('Nome do lead / cliente', 'cliente', '', 'text', 'maxlength="120" placeholder="Selecione ou digite o nome"')}${field('Valor recebido (R$) *', 'valor', '', 'number', 'required min="0.01" step="0.01" inputmode="decimal" placeholder="Informe o valor"')}<label class="field">Forma de pagamento<select name="pagamento" required><option>Pix à vista</option><option>Pix parcelado</option><option>Cartão de crédito</option><option>Boleto</option><option>Transferência</option><option>Dinheiro</option></select></label><label class="field">Exibir horário como ocorrido há<input name="tempoQuantidade" type="number" min="0" max="100000" step="1" value="1" required></label><label class="field">Unidade de tempo<select name="tempoUnidade"><option value="minutes">Minutos</option><option value="hours" selected>Horas</option><option value="days">Dias</option><option value="weeks">Semanas</option></select></label><label class="field full">Mensagem pronta — editável<textarea name="mensagem" id="notification-message" maxlength="240">${esc(initial.message)}</textarea></label></div><div class="notification-form-footer"><span>O título acompanha o contato selecionado. O valor e o pagamento entram no aviso.</span><button class="btn" type="submit">${icon('spark')}Lançar notificação</button></div></form></section>
+    <aside class="notification-preview-panel"><div class="notification-preview-label"><span>PRÉVIA NO APARELHO</span><span class="preview-live"><i></i> AO VIVO</span></div><div class="notification-device"><div class="notification-preview-top"><span>Notificação</span><span data-notification-preview-time>há 1 hora</span></div><div class="notification-preview-content"><img class="notification-app-icon" src="icon-192.png" alt="Logo Wezanc"><div class="notification-copy"><strong data-notification-preview-title>${esc(initial.title)}</strong><p data-notification-preview-body>Cliente: Não informado\nServiço: Site Institucional\nValor recebido: R$ 0,00\nForma de pagamento: Pix à vista\n${esc(initial.message)}</p></div></div></div><p class="notification-preview-hint">A prévia acompanha o serviço, o contato, o valor, o pagamento e a mensagem.</p><div class="notification-preview-note">${icon('shield')}<span>A logo Wezanc aparecerá junto ao aviso neste aparelho.</span></div></aside></div>
     <div class="notice">${icon('shield')}<span>O aviso é lançado imediatamente, com o horário que você configurar. Alguns aparelhos podem ignorar o horário retroativo e mostrar a hora de envio. Os alertas automáticos de vendas e mensalidades continuam funcionando.</span></div>`;
 }
 function settings() {
@@ -1065,10 +1064,10 @@ document.addEventListener('submit', e => {
       return;
     }
     const data = Object.fromEntries(new FormData(f));
-    const title = data.titulo.trim() || notificationDraft(data.servico, data.cliente).title;
+    const title = 'Venda registrada';
     const age = notificationAge(data);
     const client = data.cliente.trim() || 'Não informado';
-    const body = `Cliente: ${client} · Serviço: ${data.servico} · Valor: ${money(data.valor)} · Pagamento: ${data.pagamento}. ${data.mensagem.trim()}`;
+    const body = `Cliente: ${client}\nServiço: ${data.servico}\nValor recebido: ${money(data.valor)}\nForma de pagamento: ${data.pagamento}\n${data.mensagem.trim()}`;
     void saleNotification(title, body, {timestamp: age.timestamp}).then(sent => toast(sent ? `Notificação lançada (${age.label}).` : 'Não foi possível exibir a notificação.'));
     f.reset();
     f.elements.servico.value = 'Site Institucional';
@@ -1136,7 +1135,7 @@ document.addEventListener('submit', e => {
           data: r.dataFechamento
         });
       }
-      if (!old && r.valorPago > 0) window.pendingSaleNotification = {title: `Venda registrada - ${r.nomeNotificacao || r.pacote || 'Serviço'}`.slice(0, 80), body: `Cliente: ${r.nome} · Serviço: ${r.pacote || 'Não informado'} · Valor: ${money(r.valorPago)} · Pagamento: ${r.formaPagamento || 'Não informado'}. Venda registrada com sucesso.`};
+      if (!old && r.valorPago > 0) window.pendingSaleNotification = {title: 'Venda registrada', body: `Cliente: ${r.nome}\nServiço: ${r.pacote || 'Não informado'}\nValor recebido: ${money(r.valorPago)}\nForma de pagamento: ${r.formaPagamento || 'Não informado'}\nVenda registrada com sucesso.`};
       log(`${old ? 'Cliente atualizado' : 'Novo cliente'}: ${r.empresa || r.nome}`, 'clients');
     }
     if (f.id === 'transaction-form') {
