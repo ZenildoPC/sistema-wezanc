@@ -274,12 +274,12 @@ async function enableSaleNotifications() {
     render();
   } catch { toast('Não foi possível ativar as notificações neste navegador.'); }
 }
-async function saleNotification(title, body) {
+async function saleNotification(title, body, {timestamp = Date.now()} = {}) {
   if (demo || localStorage.getItem('wezanc_sale_notifications') !== 'on' || !('Notification' in window) || Notification.permission !== 'granted') return false;
   try {
     const registration = await navigator.serviceWorker?.ready;
-    if (registration?.showNotification) await registration.showNotification(title, {body, icon:'/icon-192.png', badge:'/icon-192.png', tag:`wezanc-sale-${Date.now()}`});
-    else new Notification(title, {body, icon:'/icon-192.png'});
+    if (registration?.showNotification) await registration.showNotification(title, {body, icon:'/icon-192.png', badge:'/icon-192.png', timestamp, tag:`wezanc-sale-${Date.now()}`});
+    else new Notification(title, {body, icon:'/icon-192.png', timestamp});
     return true;
   } catch { return false; }
 }
@@ -447,7 +447,7 @@ function handleNfcSubmit(form) {
         if (data.clienteId === 'new') db.nfc.clientes.push(customer);
         db.nfc.movimentos.push({id: uid(), tipo: 'venda', quantidade: quantity, valorCentavos: value, custoCentavos: cost, clienteId: customer.id, clienteNome: customer.nome, clienteEmpresa: customer.empresa, data: data.data, motivo: data.motivo || '', criadoEm: new Date().toISOString()});
         log(`Venda NFC: ${quantity} plaquinhas para ${customer.empresa}`, 'nfc');
-        window.pendingSaleNotification = {title: `🎉 Venda NFC para ${customer.empresa}!`, body: `${quantity} plaquinha(s) · ${money(value / 100)} via ${data.formaPagamento || 'forma não informada'}. Obrigado pela venda!`};
+        window.pendingSaleNotification = {title: `Venda NFC registrada - ${customer.empresa}`.slice(0, 80), body: `Cliente: ${customer.empresa} · Quantidade: ${quantity} · Valor: ${money(value / 100)} · Pagamento: ${data.formaPagamento || 'Não informado'}. Venda registrada com sucesso.`};
       }
     }
     const saved = save(form.id === 'nfc-sale-form' ? 'Venda registrada. Estoque atualizado automaticamente.' : 'Dados NFC salvos neste navegador.');
@@ -600,13 +600,73 @@ const agentData = [['Social media e conteúdo', 'Estratégias para Instagram, Re
 function agents() {
   return head('Central de agentes', 'Seus agentes de IA, organizados por especialidade.') + `<div class="notice">${icon('ai')}<span>Os agentes abrem no Gemini, em uma nova aba, e podem solicitar login. Nenhum dado do cliente é enviado automaticamente.</span></div><div class="cards">${agentData.map(([name, desc, url, tag]) => `<article class="card"><div class="card-head"><span class="avatar">${icon('spark')}</span><span class="tag">${tag}</span></div><h3>${name}</h3><p class="card-text">${desc}</p><a class="btn secondary" href="https://share.gemini.google/${url}" target="_blank" rel="noopener noreferrer">Abrir agente ${icon('outbound')}</a></article>`).join('')}</div>`;
 }
+const notificationMessages = {
+  'Landing Page Express': 'A contratação da Landing Page Express foi registrada e está pronta para iniciar.',
+  'Site Institucional': 'A venda do Site Institucional foi registrada. O projeto está pronto para começar.',
+  'E-commerce': 'A venda do E-commerce foi confirmada. A implantação da loja virtual pode começar.',
+  'Sistema de Agendamento': 'A venda do Sistema de Agendamento foi registrada e seguirá para configuração.',
+  'Sistema de Gestão': 'A venda do Sistema de Gestão foi confirmada. O projeto seguirá para implantação.',
+  'Aplicativo Web': 'A contratação do Aplicativo Web foi registrada e seguirá para desenvolvimento.',
+  'Automação Comercial': 'A venda da Automação Comercial foi registrada. A configuração poderá ser iniciada.',
+  'Venda de plaquinhas NFC': 'A venda das plaquinhas NFC foi registrada com sucesso.',
+  'Outro': 'A venda foi registrada com sucesso e está pronta para acompanhamento.'
+};
+function notificationDraft(service, name = '') {
+  const lead = String(name || '').trim();
+  return {
+    title: (lead ? `Venda registrada - ${lead}` : 'Venda registrada').slice(0, 80),
+    message: notificationMessages[service] || notificationMessages.Outro
+  };
+}
+function notificationAge(data) {
+  const quantity = Math.max(0, Number(data.tempoQuantidade) || 0);
+  const unit = data.tempoUnidade || 'hours';
+  const units = {minutes: [60000, 'minuto', 'minutos'], hours: [3600000, 'hora', 'horas'], days: [86400000, 'dia', 'dias'], weeks: [604800000, 'semana', 'semanas']};
+  if (!quantity) return {label: 'agora', timestamp: Date.now()};
+  const [milliseconds, singular, plural] = units[unit] || units.hours;
+  return {label: `há ${quantity} ${quantity === 1 ? singular : plural}`, timestamp: Date.now() - quantity * milliseconds};
+}
+function updateNotificationPreview() {
+  const form = $('#notification-form');
+  if (!form) return;
+  const data = Object.fromEntries(new FormData(form));
+  const who = String(data.cliente || '').trim() || 'Não informado';
+  const amount = money(data.valor || 0);
+  const payment = data.pagamento || 'Não informado';
+  const service = data.servico || 'Não informado';
+  const title = String(data.titulo || '').trim() || notificationDraft(service, who).title;
+  const body = `Cliente: ${who} · Serviço: ${service} · Valor: ${amount} · Pagamento: ${payment}. ${String(data.mensagem || '').trim()}`;
+  const age = notificationAge(data);
+  const titleNode = $('[data-notification-preview-title]');
+  const bodyNode = $('[data-notification-preview-body]');
+  const timeNode = $('[data-notification-preview-time]');
+  if (titleNode) titleNode.textContent = title;
+  if (bodyNode) bodyNode.textContent = body;
+  if (timeNode) timeNode.textContent = age.label;
+}
+function applyNotificationDraft() {
+  const form = $('#notification-form');
+  if (!form) return;
+  const selected = $('#notification-lead')?.selectedOptions[0];
+  const name = selected?.dataset.name || form.elements.cliente.value.trim();
+  if (selected?.dataset.name) form.elements.cliente.value = selected.dataset.name;
+  const draft = notificationDraft(form.elements.servico.value, name);
+  form.elements.titulo.value = draft.title;
+  form.elements.mensagem.value = draft.message;
+  updateNotificationPreview();
+}
 function notificationsPage() {
   const enabled = 'Notification' in window && Notification.permission === 'granted' && localStorage.getItem('wezanc_sale_notifications') === 'on';
-  const services = ['Landing Page Express', 'Site Institucional', 'E-commerce', 'Sistema de Agendamento', 'Sistema de Gestão', 'Aplicativo Web', 'Automação Comercial', 'Venda de plaquinhas NFC', 'Outro'];
-  return head('Central de notificações', 'Monte e lance um aviso personalizado para este aparelho.') +
-    `<section class="panel notification-composer"><div class="panel-head"><div><h2>${enabled ? 'Notificações ativadas' : 'Ative as notificações neste aparelho'}</h2><p>${enabled ? 'Você já pode lançar avisos manualmente. As vendas registradas também podem gerar avisos automáticos.' : 'O navegador pedirá autorização. No iPhone e iPad, abra o app pela Tela de Início.'}</p></div>${enabled ? '<span class="tag">Pronto para enviar</span>' : btn('Ativar notificações', 'enable-sale-notifications', 'spark', 'secondary')}</div>
-    <form id="notification-form"><div class="form-grid">${select('Serviço ou sistema', 'servico', services, 'Site Institucional')}${field('Nome que aparecerá no aviso', 'titulo', '', 'text', 'maxlength="80" placeholder="Ex.: Sistema da Clínica Aurora"')}${field('Cliente ou empresa', 'cliente', '', 'text', 'maxlength="120" placeholder="Ex.: Clínica Aurora"')}${field('Valor da venda (R$)', 'valor', '', 'number', 'min="0" step="0.01" inputmode="decimal" placeholder="Opcional"')}${select('Forma de pagamento', 'pagamento', ['Pix à vista', 'Pix parcelado', 'Cartão de crédito', 'Boleto', 'Transferência', 'Dinheiro', 'Não informar'], 'Pix à vista')}<label class="field full">Mensagem adicional<textarea name="mensagem" maxlength="240" placeholder="Ex.: Projeto aprovado e já entrou em produção!"></textarea></label></div><div class="actions notification-actions"><button class="btn" type="submit">${icon('spark')}Lançar notificação</button></div></form></section>
-    <div class="notice">${icon('shield')}<span>Os avisos manuais aparecem apenas neste aparelho. As notificações automáticas de novas vendas e mensalidades continuam funcionando.</span></div>`;
+  const services = Object.keys(notificationMessages);
+  const leads = db.prospects.map(c => `<option value="lead:${esc(c.id)}" data-name="${esc(c.nome)}">${esc(c.nome)}${c.empresa ? ` · ${esc(c.empresa)}` : ''}</option>`).join('');
+  const clients = db.clientes.map(c => `<option value="client:${esc(c.id)}" data-name="${esc(c.nome)}">${esc(c.nome)}${c.empresa ? ` · ${esc(c.empresa)}` : ''}</option>`).join('');
+  const initial = notificationDraft('Site Institucional');
+  return head('Central de notificações', 'Prepare um aviso profissional com os dados da venda e confira a prévia antes de enviar.') +
+    `<section class="notification-status ${enabled ? 'is-ready' : ''}"><div class="notification-status-icon">${icon('spark')}</div><div><span class="eyebrow">CENTRAL DE AVISOS</span><h2>${enabled ? 'Notificações prontas' : 'Ative as notificações neste aparelho'}</h2><p>${enabled ? 'Alertas manuais e avisos de novas vendas podem aparecer aqui.' : 'Autorize os avisos uma vez para começar a usar.'}</p></div>${enabled ? '<span class="notification-status-pill">Ativado</span>' : btn('Ativar notificações', 'enable-sale-notifications', 'spark')}</section>
+    <div class="notification-layout"><section class="panel notification-composer"><div class="notification-section-head"><div><span class="eyebrow">NOVA NOTIFICAÇÃO</span><h2>Dados da venda</h2><p>Selecione o contato para inserir o nome automaticamente.</p></div></div>
+    <form id="notification-form"><div class="form-grid"><label class="field">Serviço ou sistema<select name="servico" id="notification-service">${services.map(s => `<option ${s === 'Site Institucional' ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label><label class="field">Lead ou cliente<select name="leadId" id="notification-lead"><option value="">Escolher contato (opcional)</option>${leads ? `<optgroup label="Leads">${leads}</optgroup>` : ''}${clients ? `<optgroup label="Clientes">${clients}</optgroup>` : ''}</select></label>${field('Título da notificação', 'titulo', initial.title, 'text', 'maxlength="80" placeholder="Venda registrada"')}${field('Nome do lead / cliente', 'cliente', '', 'text', 'maxlength="120" placeholder="Selecione ou digite o nome"')}${field('Valor recebido (R$) *', 'valor', '', 'number', 'required min="0.01" step="0.01" inputmode="decimal" placeholder="Informe o valor"')}<label class="field">Forma de pagamento<select name="pagamento" required><option>Pix à vista</option><option>Pix parcelado</option><option>Cartão de crédito</option><option>Boleto</option><option>Transferência</option><option>Dinheiro</option></select></label><label class="field">Exibir horário como ocorrido há<input name="tempoQuantidade" type="number" min="0" max="100000" step="1" value="1" required></label><label class="field">Unidade de tempo<select name="tempoUnidade"><option value="minutes">Minutos</option><option value="hours" selected>Horas</option><option value="days">Dias</option><option value="weeks">Semanas</option></select></label><label class="field full">Mensagem pronta — editável<textarea name="mensagem" id="notification-message" maxlength="240">${esc(initial.message)}</textarea></label></div><div class="notification-form-footer"><span>O título acompanha o contato selecionado. O valor e o pagamento entram no aviso.</span><button class="btn" type="submit">${icon('spark')}Lançar notificação</button></div></form></section>
+    <aside class="notification-preview-panel"><div class="notification-preview-label"><span>PRÉVIA NO APARELHO</span><span class="preview-live"><i></i> AO VIVO</span></div><div class="notification-device"><div class="notification-preview-top"><span>Notificação</span><span data-notification-preview-time>há 1 hora</span></div><div class="notification-preview-content"><img class="notification-app-icon" src="icon-192.png" alt="Logo Wezanc"><div class="notification-copy"><strong data-notification-preview-title>${esc(initial.title)}</strong><p data-notification-preview-body>Cliente: Não informado · Serviço: Site Institucional · Valor: R$ 0,00 · Pagamento: Pix à vista. ${esc(initial.message)}</p></div></div></div><p class="notification-preview-hint">A prévia acompanha o serviço, o contato, o valor, o pagamento e a mensagem.</p><div class="notification-preview-note">${icon('shield')}<span>A logo Wezanc aparecerá junto ao aviso neste aparelho.</span></div></aside></div>
+    <div class="notice">${icon('shield')}<span>O aviso é lançado imediatamente, com o horário que você configurar. Alguns aparelhos podem ignorar o horário retroativo e mostrar a hora de envio. Os alertas automáticos de vendas e mensalidades continuam funcionando.</span></div>`;
 }
 function settings() {
   const notificationsOn = localStorage.getItem('wezanc_sale_notifications') === 'on' && ('Notification' in window) && Notification.permission === 'granted';
@@ -958,7 +1018,7 @@ document.addEventListener('click', e => {
         });
         log(`Manutenção recebida: ${c.empresa || c.nome}`, 'finance');
         const saved = save('Recebimento registrado.');
-        if (saved) void saleNotification('Mensalidade recebida! ✨', `${c.empresa || c.nome} pagou ${money(c.valorPlanoManutencao)} pela manutenção via ${c.formaPagamento || 'forma não informada'}.`);
+        if (saved) void saleNotification('Mensalidade recebida', `Cliente: ${c.empresa || c.nome} · Serviço: Manutenção · Valor: ${money(c.valorPlanoManutencao)} · Pagamento: ${c.formaPagamento || 'Não informado'}. Recebimento registrado com sucesso.`);
         close();
         render();
       }
@@ -1005,13 +1065,14 @@ document.addEventListener('submit', e => {
       return;
     }
     const data = Object.fromEntries(new FormData(f));
-    const title = data.titulo.trim() || `✨ ${data.servico}`;
-    const amount = data.valor ? ` · ${money(data.valor)}` : '';
-    const payment = data.pagamento && data.pagamento !== 'Não informar' ? ` via ${data.pagamento}` : '';
-    const client = data.cliente.trim() ? `${data.cliente} — ` : '';
-    const extra = data.mensagem.trim() ? ` ${data.mensagem.trim()}` : '';
-    void saleNotification(title, `${client}${data.servico}${amount}${payment}.${extra}`).then(sent => toast(sent ? 'Notificação lançada neste aparelho.' : 'Não foi possível exibir a notificação.'));
+    const title = data.titulo.trim() || notificationDraft(data.servico, data.cliente).title;
+    const age = notificationAge(data);
+    const client = data.cliente.trim() || 'Não informado';
+    const body = `Cliente: ${client} · Serviço: ${data.servico} · Valor: ${money(data.valor)} · Pagamento: ${data.pagamento}. ${data.mensagem.trim()}`;
+    void saleNotification(title, body, {timestamp: age.timestamp}).then(sent => toast(sent ? `Notificação lançada (${age.label}).` : 'Não foi possível exibir a notificação.'));
     f.reset();
+    f.elements.servico.value = 'Site Institucional';
+    applyNotificationDraft();
     return;
   }
   if (['nfc-sale-form', 'nfc-stock-form', 'nfc-customer-form'].includes(f.id)) {
@@ -1075,7 +1136,7 @@ document.addEventListener('submit', e => {
           data: r.dataFechamento
         });
       }
-      if (!old && r.valorPago > 0) window.pendingSaleNotification = {title: `🎉 ${r.nomeNotificacao || r.pacote || 'Venda fechada!'}`, body: `${r.empresa || r.nome} · ${money(r.valorPago)} via ${r.formaPagamento || 'forma não informada'}. Mais um projeto incrível a caminho!`};
+      if (!old && r.valorPago > 0) window.pendingSaleNotification = {title: `Venda registrada - ${r.nomeNotificacao || r.pacote || 'Serviço'}`.slice(0, 80), body: `Cliente: ${r.nome} · Serviço: ${r.pacote || 'Não informado'} · Valor: ${money(r.valorPago)} · Pagamento: ${r.formaPagamento || 'Não informado'}. Venda registrada com sucesso.`};
       log(`${old ? 'Cliente atualizado' : 'Novo cliente'}: ${r.empresa || r.nome}`, 'clients');
     }
     if (f.id === 'transaction-form') {
@@ -1112,8 +1173,13 @@ document.addEventListener('submit', e => {
     toast(err.message);
   }
 });
+document.addEventListener('input', e => {
+  if (e.target.closest('#notification-form')) updateNotificationPreview();
+});
 document.addEventListener('change', e => {
   let t = e.target;
+  if (t.id === 'notification-service' || t.id === 'notification-lead') { applyNotificationDraft(); return; }
+  if (t.closest('#notification-form')) { updateNotificationPreview(); return; }
   if ((t.dataset.stage || t.dataset.task) && (storageFailed || loadError) && !demo) {
     toast('Resolva o armazenamento antes de editar.');
     render();
