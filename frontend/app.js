@@ -264,6 +264,24 @@ function toast(text) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 4200);
 }
+async function enableSaleNotifications() {
+  if (!('Notification' in window)) return toast('Este navegador não oferece notificações.');
+  try {
+    const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== 'granted') return toast('Permita notificações nas configurações do navegador.');
+    localStorage.setItem('wezanc_sale_notifications', 'on');
+    toast('Notificações de vendas ativadas neste aparelho.');
+    render();
+  } catch { toast('Não foi possível ativar as notificações neste navegador.'); }
+}
+async function saleNotification(title, body) {
+  if (demo || localStorage.getItem('wezanc_sale_notifications') !== 'on' || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const registration = await navigator.serviceWorker?.ready;
+    if (registration?.showNotification) await registration.showNotification(title, {body, icon:'/icon-192.png', badge:'/icon-192.png', tag:`wezanc-sale-${Date.now()}`});
+    else new Notification(title, {body, icon:'/icon-192.png'});
+  } catch {}
+}
 const lost = c => c.statusInbound === '07_nao_fechou' || c.statusOutbound === '06_nao_fechou';
 const flow = c => c.origem === IN ? 'inbound' : 'outbound',
   status = c => c[flow(c) === 'inbound' ? 'statusInbound' : 'statusOutbound'];
@@ -382,7 +400,7 @@ function nfcSaleForm(customerId) {
     return;
   }
   const hasCustomers = db.nfc.clientes.length > 0;
-  modal('Registrar venda NFC', `<form id="nfc-sale-form"><div class="notice">${icon('nfc')}<span><strong>${nfcStock()} plaquinhas disponíveis.</strong> A quantidade será descontada ao salvar a venda.</span></div><div class="form-grid"><label class="field full">Cliente / comércio *<select id="nfc-sale-customer" name="clienteId">${db.nfc.clientes.map(c => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(c.empresa || c.nome)} · ${esc(c.nome)}</option>`).join('')}<option value="new" ${!hasCustomers ? 'selected' : ''}>+ Cadastrar novo cliente</option></select></label><div class="form-grid full" id="nfc-new-customer-fields" ${hasCustomers ? 'hidden' : ''}>${nfcCustomerFields()}</div>${field('Quantidade de plaquinhas *', 'quantidade', 1, 'number', `required min="1" max="${nfcStock()}" step="1" inputmode="numeric"`)}${field('Valor total da venda (R$) *', 'valorVenda', '', 'number', 'required min="0" step="0.01" inputmode="decimal"')}${field('Data da venda *', 'data', today(), 'date', 'required')}<label class="field full">Observação da venda<input name="motivo" maxlength="500" placeholder="Ex.: plaquinha de avaliações do Google"></label></div><p class="sub nfc-sale-preview" id="nfc-sale-preview" aria-live="polite">Após esta venda: ${nfcStock() - 1} plaquinhas em estoque.</p>${footer('Registrar venda')}</form>`);
+  modal('Registrar venda NFC', `<form id="nfc-sale-form"><div class="notice">${icon('nfc')}<span><strong>${nfcStock()} plaquinhas disponíveis.</strong> A quantidade será descontada ao salvar a venda.</span></div><div class="form-grid"><label class="field full">Cliente / comércio *<select id="nfc-sale-customer" name="clienteId">${db.nfc.clientes.map(c => `<option value="${esc(c.id)}" ${c.id === customerId ? 'selected' : ''}>${esc(c.empresa || c.nome)} · ${esc(c.nome)}</option>`).join('')}<option value="new" ${!hasCustomers ? 'selected' : ''}>+ Cadastrar novo cliente</option></select></label><div class="form-grid full" id="nfc-new-customer-fields" ${hasCustomers ? 'hidden' : ''}>${nfcCustomerFields()}</div>${field('Quantidade de plaquinhas *', 'quantidade', 1, 'number', `required min="1" max="${nfcStock()}" step="1" inputmode="numeric"`)}${field('Valor total da venda (R$) *', 'valorVenda', '', 'number', 'required min="0" step="0.01" inputmode="decimal"')}${select('Forma de pagamento', 'formaPagamento', ['Pix', 'Cartão de crédito', 'Dinheiro', 'Transferência', 'Boleto'], 'Pix')}${field('Data da venda *', 'data', today(), 'date', 'required')}<label class="field full">Observação da venda<input name="motivo" maxlength="500" placeholder="Ex.: plaquinha de avaliações do Google"></label></div><p class="sub nfc-sale-preview" id="nfc-sale-preview" aria-live="polite">Após esta venda: ${nfcStock() - 1} plaquinhas em estoque.</p>${footer('Registrar venda')}</form>`);
   $('#nfc-new-customer-fields').querySelectorAll('input,textarea').forEach(input => input.disabled = hasCustomers);
 }
 function updateNfcSalePreview(input) {
@@ -399,6 +417,7 @@ function readNfcCustomer(data, id = uid()) {
   return {id, nome: data.nome.trim(), empresa: data.empresa.trim(), whatsapp: data.whatsapp || '', notas: data.notas || ''};
 }
 function handleNfcSubmit(form) {
+  window.pendingSaleNotification = null;
   if ((storageFailed || loadError) && !demo) {toast('Resolva o armazenamento antes de editar.'); return;}
   const data = Object.fromEntries(new FormData(form));
   try {
@@ -427,9 +446,12 @@ function handleNfcSubmit(form) {
         if (data.clienteId === 'new') db.nfc.clientes.push(customer);
         db.nfc.movimentos.push({id: uid(), tipo: 'venda', quantidade: quantity, valorCentavos: value, custoCentavos: cost, clienteId: customer.id, clienteNome: customer.nome, clienteEmpresa: customer.empresa, data: data.data, motivo: data.motivo || '', criadoEm: new Date().toISOString()});
         log(`Venda NFC: ${quantity} plaquinhas para ${customer.empresa}`, 'nfc');
+        window.pendingSaleNotification = {title: `🎉 Venda NFC para ${customer.empresa}!`, body: `${quantity} plaquinha(s) · ${money(value / 100)} via ${data.formaPagamento || 'forma não informada'}. Obrigado pela venda!`};
       }
     }
-    if (save(form.id === 'nfc-sale-form' ? 'Venda registrada. Estoque atualizado automaticamente.' : 'Dados NFC salvos neste navegador.')) close();
+    const saved = save(form.id === 'nfc-sale-form' ? 'Venda registrada. Estoque atualizado automaticamente.' : 'Dados NFC salvos neste navegador.');
+    if (saved) close();
+    if (saved && form.id === 'nfc-sale-form' && window.pendingSaleNotification) { const n = window.pendingSaleNotification; window.pendingSaleNotification = null; void saleNotification(n.title, n.body); }
     render();
   } catch (err) {toast(err.message);}
 }
@@ -576,7 +598,8 @@ function agents() {
   return head('Central de agentes', 'Seus agentes de IA, organizados por especialidade.') + `<div class="notice">${icon('ai')}<span>Os agentes abrem no Gemini, em uma nova aba, e podem solicitar login. Nenhum dado do cliente é enviado automaticamente.</span></div><div class="cards">${agentData.map(([name, desc, url, tag]) => `<article class="card"><div class="card-head"><span class="avatar">${icon('spark')}</span><span class="tag">${tag}</span></div><h3>${name}</h3><p class="card-text">${desc}</p><a class="btn secondary" href="https://share.gemini.google/${url}" target="_blank" rel="noopener noreferrer">Abrir agente ${icon('outbound')}</a></article>`).join('')}</div>`;
 }
 function settings() {
-  return head('Seu workspace, do seu jeito.', 'Dados organizados, backups acessíveis e uma experiência mais leve.') + `<div class="notice">${icon('shield')}<span>Os dados ficam neste navegador e neste endereço. Fechar o app ou reiniciar o dispositivo não apaga a base. Limpar os dados do navegador, usar navegação privada ou mudar de endereço pode impedir a recuperação. iPad e celular têm bases separadas: transfira os dados por backup JSON.</span></div><div class="cards"><section class="card"><h2>Backup dos seus dados</h2><p class="card-text">Baixe uma cópia fora do navegador. O histórico local ajuda a desfazer alterações, mas também pode ser apagado ao limpar os dados do navegador.</p>${btn('Exportar backup', 'export', 'download')} ${btn('Histórico automático', 'backups', 'maintenance', 'secondary')}</section><section class="card"><h2>Migrar do sistema anterior</h2><p class="card-text">No Wezanc OS, toque em “Exp”. Importe aqui o arquivo JSON para trazer clientes, leads, tarefas e transações.</p>${btn('Importar backup', 'import', 'upload', 'secondary')}</section><section class="card"><h2>Demonstração para portfólio</h2><p class="card-text">Veja exemplos fictícios de projetos e receitas. Sua base real fica separada durante a demonstração.</p>${btn(demo ? 'Sair da demonstração' : 'Abrir demonstração', demo ? 'exit-demo' : 'demo', 'spark', 'secondary')}</section><section class="card full"><h2>Acesso no iPad e no celular</h2><p class="card-text">Use a barra inferior para acessar os módulos. No Safari, você pode usar Compartilhar → Adicionar à Tela de Início para criar um atalho. Abra sempre o mesmo endereço da Vercel para acessar esta base. Após o primeiro carregamento, o app pode funcionar offline neste dispositivo.</p><span class="tag">Toque confortável</span> <span class="tag">Layout adaptativo</span> <span class="tag">Armazenamento local</span></section><section class="card full"><h2>Proteção do armazenamento</h2><p class="card-text">Peça ao navegador para priorizar a preservação dos dados. A disponibilidade depende do navegador e não substitui o backup em arquivo.</p><div class="actions">${btn('Verificar armazenamento', 'storage-info', 'shield', 'secondary')}${btn('Solicitar persistência', 'persist-storage', 'shield', 'secondary')}</div></section></div>`;
+  const notificationsOn = localStorage.getItem('wezanc_sale_notifications') === 'on' && ('Notification' in window) && Notification.permission === 'granted';
+  return head('Seu workspace, do seu jeito.', 'Dados organizados, backups acessíveis e uma experiência mais leve.') + `<div class="notice">${icon('shield')}<span>Os dados ficam neste navegador e neste endereço. Fechar o app ou reiniciar o dispositivo não apaga a base. Limpar os dados do navegador, usar navegação privada ou mudar de endereço pode impedir a recuperação. iPad e celular têm bases separadas: transfira os dados por backup JSON.</span></div><div class="cards"><section class="card"><h2>Notificações de vendas</h2><p class="card-text">Receba avisos personalizados de vendas e mensalidades neste aparelho.</p>${btn(notificationsOn ? 'Notificações ativadas' : 'Ativar notificações de vendas', 'enable-sale-notifications', 'spark', 'secondary')}</section><section class="card"><h2>Backup dos seus dados</h2><p class="card-text">Baixe uma cópia fora do navegador. O histórico local ajuda a desfazer alterações, mas também pode ser apagado ao limpar os dados do navegador.</p>${btn('Exportar backup', 'export', 'download')} ${btn('Histórico automático', 'backups', 'maintenance', 'secondary')}</section><section class="card"><h2>Migrar do sistema anterior</h2><p class="card-text">No Wezanc OS, toque em “Exp”. Importe aqui o arquivo JSON para trazer clientes, leads, tarefas e transações.</p>${btn('Importar backup', 'import', 'upload', 'secondary')}</section><section class="card"><h2>Demonstração para portfólio</h2><p class="card-text">Veja exemplos fictícios de projetos e receitas. Sua base real fica separada durante a demonstração.</p>${btn(demo ? 'Sair da demonstração' : 'Abrir demonstração', demo ? 'exit-demo' : 'demo', 'spark', 'secondary')}</section><section class="card full"><h2>Acesso no iPad e no celular</h2><p class="card-text">Use a barra inferior para acessar os módulos. No Safari, você pode usar Compartilhar → Adicionar à Tela de Início para criar um atalho. Abra sempre o mesmo endereço da Vercel para acessar esta base. Após o primeiro carregamento, o app pode funcionar offline neste dispositivo.</p><span class="tag">Toque confortável</span> <span class="tag">Layout adaptativo</span> <span class="tag">Armazenamento local</span></section><section class="card full"><h2>Proteção do armazenamento</h2><p class="card-text">Peça ao navegador para priorizar a preservação dos dados. A disponibilidade depende do navegador e não substitui o backup em arquivo.</p><div class="actions">${btn('Verificar armazenamento', 'storage-info', 'shield', 'secondary')}${btn('Solicitar persistência', 'persist-storage', 'shield', 'secondary')}</div></section></div>`;
 }
 function modal(title, body) {
   $('#modal').innerHTML = `<div class="modal-head"><h2>${title}</h2><button class="icon-button" data-action="close" aria-label="Fechar">${icon('close')}</button></div><div class="modal-body">${body}</div>`;
@@ -599,11 +622,12 @@ function clientForm(id) {
   let c = db.clientes.find(c => c.id === id) || {
     origem: page === 'outbound' ? OUT : IN,
     pacote: 'Site Institucional',
+    nomeNotificacao: 'Site Institucional',
     valorPago: 0,
     valorPlanoManutencao: 150,
     diaVencimentoManutencao: 10
   };
-  modal(id ? 'Editar cliente' : 'Novo cliente', `<form id="client-form" data-id="${esc(id || '')}"><div class="form-grid">${field('Nome do responsável *', 'nome', c.nome, 'text', 'required maxlength="120" autocomplete="name"')}${field('Empresa', 'empresa', c.empresa, 'text', 'maxlength="160" autocomplete="organization"')}${field('WhatsApp com DDD *', 'whatsapp', c.whatsapp, 'tel', 'required minlength="10" maxlength="22" autocomplete="tel"')}${field('CPF / CNPJ', 'documento', c.documento, 'text', 'maxlength="25" inputmode="numeric"')}${select('Origem', 'origem', [IN, OUT], c.origem)}${select('Projeto / pacote', 'pacote', ['Landing Page Express', 'Site Institucional', 'E-commerce'], c.pacote)}${field('Valor já recebido (R$)', 'valorPago', c.valorPago, 'number', 'min="0" step="0.01" inputmode="decimal" required')}${select('Forma de pagamento', 'formaPagamento', ['Pix à vista', 'Pix parcelado', 'Cartão de crédito', 'Boleto', 'Transferência'], c.formaPagamento || 'Pix à vista')}${field('Data do recebimento / cadastro', 'dataFechamento', (c.dataFechamento || today()).slice(0, 10), 'date', 'required')}<label class="check-task full"><input name="temPlanoManutencao" type="checkbox" ${c.temPlanoManutencao ? 'checked' : ''}><span>Ativar plano de manutenção recorrente</span></label>${field('Valor mensal (R$)', 'valorPlanoManutencao', c.valorPlanoManutencao, 'number', 'min="0" step="0.01" inputmode="decimal" required')}${field('Dia do vencimento (1 a 28)', 'diaVencimentoManutencao', c.diaVencimentoManutencao, 'number', 'min="1" max="28" step="1" inputmode="numeric" required')}<label class="field full">Notas do cliente<textarea name="notasAnotacoes" maxlength="10000">${esc(c.notasAnotacoes)}</textarea></label></div>${footer('Salvar cliente')}</form>`);
+  modal(id ? 'Editar cliente' : 'Novo cliente', `<form id="client-form" data-id="${esc(id || '')}"><div class="form-grid">${field('Nome do responsável *', 'nome', c.nome, 'text', 'required maxlength="120" autocomplete="name"')}${field('Empresa', 'empresa', c.empresa, 'text', 'maxlength="160" autocomplete="organization"')}${field('WhatsApp com DDD *', 'whatsapp', c.whatsapp, 'tel', 'required minlength="10" maxlength="22" autocomplete="tel"')}${field('CPF / CNPJ', 'documento', c.documento, 'text', 'maxlength="25" inputmode="numeric"')}${select('Origem', 'origem', [IN, OUT], c.origem)}${select('Projeto / pacote', 'pacote', ['Landing Page Express', 'Site Institucional', 'E-commerce', 'Sistema de Agendamento', 'Sistema de Gestão', 'Aplicativo Web', 'Automação Comercial'], c.pacote)}${field('Nome que aparece na notificação', 'nomeNotificacao', c.nomeNotificacao || c.pacote, 'text', 'maxlength="80" placeholder="Ex.: Sistema de Gestão da Clínica Aurora"')}${field('Valor já recebido (R$)', 'valorPago', c.valorPago, 'number', 'min="0" step="0.01" inputmode="decimal" required')}${select('Forma de pagamento', 'formaPagamento', ['Pix à vista', 'Pix parcelado', 'Cartão de crédito', 'Boleto', 'Transferência'], c.formaPagamento || 'Pix à vista')}${field('Data do recebimento / cadastro', 'dataFechamento', (c.dataFechamento || today()).slice(0, 10), 'date', 'required')}<label class="check-task full"><input name="temPlanoManutencao" type="checkbox" ${c.temPlanoManutencao ? 'checked' : ''}><span>Ativar plano de manutenção recorrente</span></label>${field('Valor mensal (R$)', 'valorPlanoManutencao', c.valorPlanoManutencao, 'number', 'min="0" step="0.01" inputmode="decimal" required')}${field('Dia do vencimento (1 a 28)', 'diaVencimentoManutencao', c.diaVencimentoManutencao, 'number', 'min="1" max="28" step="1" inputmode="numeric" required')}<label class="field full">Notas do cliente<textarea name="notasAnotacoes" maxlength="10000">${esc(c.notasAnotacoes)}</textarea></label></div>${footer('Salvar cliente')}</form>`);
 }
 function detail(id) {
   let c = db.clientes.find(c => c.id === id);
@@ -787,6 +811,9 @@ document.addEventListener('click', e => {
         render();
       }
       break;
+    case 'enable-sale-notifications':
+      void enableSaleNotifications();
+      break;
     case 'settings':
       go('settings');
       break;
@@ -919,7 +946,8 @@ document.addEventListener('click', e => {
           competencia: today().slice(0, 7)
         });
         log(`Manutenção recebida: ${c.empresa || c.nome}`, 'finance');
-        save('Recebimento registrado.');
+        const saved = save('Recebimento registrado.');
+        if (saved) void saleNotification('Mensalidade recebida! ✨', `${c.empresa || c.nome} pagou ${money(c.valorPlanoManutencao)} pela manutenção via ${c.formaPagamento || 'forma não informada'}.`);
         close();
         render();
       }
@@ -970,6 +998,7 @@ document.addEventListener('submit', e => {
     toast('Resolva o armazenamento antes de editar.');
     return;
   }
+  window.pendingSaleNotification = null;
   let data = Object.fromEntries(new FormData(f)),
     id = f.dataset.id;
   try {
@@ -1019,6 +1048,7 @@ document.addEventListener('submit', e => {
           data: r.dataFechamento
         });
       }
+      if (!old && r.valorPago > 0) window.pendingSaleNotification = {title: `🎉 ${r.nomeNotificacao || r.pacote || 'Venda fechada!'}`, body: `${r.empresa || r.nome} · ${money(r.valorPago)} via ${r.formaPagamento || 'forma não informada'}. Mais um projeto incrível a caminho!`};
       log(`${old ? 'Cliente atualizado' : 'Novo cliente'}: ${r.empresa || r.nome}`, 'clients');
     }
     if (f.id === 'transaction-form') {
@@ -1047,8 +1077,9 @@ document.addEventListener('submit', e => {
         log(`Não fechado: ${c.empresa || c.nome}`, 'lost');
       }
     }
-    save(demo ? 'Atualizado na demonstração.' : 'Alterações salvas neste dispositivo.');
-    close();
+    const saved = save(demo ? 'Atualizado na demonstração.' : 'Alterações salvas neste dispositivo.');
+    if (saved) close();
+    if (saved && window.pendingSaleNotification) { const n = window.pendingSaleNotification; window.pendingSaleNotification = null; void saleNotification(n.title, n.body); }
     render();
   } catch (err) {
     toast(err.message);
